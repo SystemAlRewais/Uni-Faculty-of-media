@@ -1,0 +1,1368 @@
+
+<script>
+/* =========================================
+   MEDIA ACADEMY CLOUD
+   Frontend Controller
+========================================= */
+
+let authToken = "";
+let currentUser = null;
+let adminData = null;
+let currentAdminTab = "overview";
+
+/* عناصر الصفحة */
+
+const $ = id => document.getElementById(id);
+
+function escapeHTML(value) {
+  return String(value ?? "").replace(/[&<>"']/g, char => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    '"': "&quot;",
+    "'": "&#39;"
+  })[char]);
+}
+
+function showLoading(show) {
+  $("loadingOverlay").hidden = !show;
+}
+
+function showMessage(message, type = "error") {
+  const box = $("loginMessage");
+  box.hidden = false;
+  box.textContent = message;
+  box.style.color = type === "success" ? "#35d69a" : "#ff637b";
+  box.style.background = type === "success"
+    ? "rgba(53,214,154,.1)"
+    : "rgba(255,99,123,.1)";
+}
+
+function notify(message) {
+  alert(message);
+}
+
+function callServer(functionName, ...args) {
+  return new Promise((resolve, reject) => {
+    if (!google || !google.script || !google.script.run) {
+      reject(new Error("يجب تشغيل الموقع من Google Apps Script."));
+      return;
+    }
+
+    google.script.run
+      .withSuccessHandler(resolve)
+      .withFailureHandler(error => {
+        reject(new Error(error.message || "حدث خطأ في الاتصال."));
+      })[functionName](...args);
+  });
+}
+
+
+/* =========================================
+   تبديل نوع تسجيل الدخول
+========================================= */
+
+function showLoginType(type) {
+  const isStudent = type === "student";
+
+  $("studentLoginForm").hidden = !isStudent;
+  $("adminLoginForm").hidden = isStudent;
+
+  $("studentTab").classList.toggle("active", isStudent);
+  $("adminTab").classList.toggle("active", !isStudent);
+
+  $("loginMessage").hidden = true;
+}
+
+
+/* =========================================
+   تسجيل الدخول
+========================================= */
+
+$("studentLoginForm").addEventListener("submit", async event => {
+  event.preventDefault();
+
+  const code = $("studentCode").value.trim();
+  const password = $("studentPassword").value;
+
+  showLoading(true);
+
+  try {
+    const result = await callServer(
+      "loginStudent",
+      code,
+      password
+    );
+
+    authToken = result.token;
+    currentUser = result.user;
+
+    await openDashboard();
+
+  } catch (error) {
+    showMessage(error.message);
+  } finally {
+    showLoading(false);
+  }
+});
+
+$("adminLoginForm").addEventListener("submit", async event => {
+  event.preventDefault();
+
+  const username = $("adminUsername").value.trim();
+  const password = $("adminPassword").value;
+
+  showLoading(true);
+
+  try {
+    const result = await callServer(
+      "loginAdmin",
+      username,
+      password
+    );
+
+    authToken = result.token;
+    currentUser = result.user;
+
+    await openDashboard();
+
+  } catch (error) {
+    showMessage(error.message);
+  } finally {
+    showLoading(false);
+  }
+});
+
+
+/* =========================================
+   فتح لوحة التحكم
+========================================= */
+
+async function openDashboard() {
+  $("loginSection").hidden = true;
+  $("appSection").hidden = false;
+
+  $("userName").textContent = currentUser.name;
+
+  $("userInfo").textContent =
+    currentUser.role === "admin"
+      ? "لوحة تحكم الإدارة"
+      : "الكود الجامعي: " + currentUser.id +
+        " | الفرقة: " + currentUser.grade;
+
+  if (currentUser.role === "student") {
+    await renderStudentDashboard();
+  } else {
+    await loadAdminDashboard();
+  }
+}
+
+
+/* =========================================
+   تسجيل الخروج
+========================================= */
+
+$("logoutButton").addEventListener("click", async () => {
+  try {
+    await callServer("logout", authToken);
+  } catch (e) {
+    // يتم إنهاء الجلسة محلياً أيضاً
+  }
+
+  authToken = "";
+  currentUser = null;
+  adminData = null;
+
+  $("appSection").hidden = true;
+  $("loginSection").hidden = false;
+
+  $("studentLoginForm").reset();
+  $("adminLoginForm").reset();
+
+  showLoginType("student");
+});
+
+
+/* =========================================
+   لوحة الطالب
+========================================= */
+
+async function renderStudentDashboard() {
+  showLoading(true);
+
+  try {
+    const data = await callServer(
+      "getStudentDashboard",
+      authToken
+    );
+
+    let html = `
+      <div class="dashboard-grid">
+
+        <div class="dashboard-card">
+          <div class="card-icon">🎓</div>
+          <h3>بيانات الطالب</h3>
+          <p>${escapeHTML(data.user.name)}</p>
+          <p>الفرقة: ${escapeHTML(data.user.grade)}</p>
+          <p>الكود: ${escapeHTML(data.user.id)}</p>
+        </div>
+
+        <div class="dashboard-card">
+          <div class="card-icon">📚</div>
+          <h3>المحتوى الدراسي</h3>
+          <p>عدد الملفات المتاحة: ${data.content.length}</p>
+        </div>
+
+        <div class="dashboard-card">
+          <div class="card-icon">📢</div>
+          <h3>الإعلانات</h3>
+          <p>عدد الإعلانات: ${data.announcements.length}</p>
+        </div>
+
+      </div>
+
+      <section class="content-section">
+        <div class="section-title">
+          <h3>📚 المحتوى الدراسي</h3>
+        </div>
+
+        <div class="item-list">
+    `;
+
+    if (data.content.length) {
+      data.content.forEach(item => {
+        const typeNames = {
+          book: "كتاب",
+          schedule: "جدول",
+          exam: "امتحان"
+        };
+
+        html += `
+          <div class="list-item">
+            <div>
+              <strong>${escapeHTML(item.title)}</strong>
+              <small>${escapeHTML(typeNames[item.type] || item.type)}</small>
+            </div>
+            <a href="${escapeHTML(item.url)}"
+               target="_blank"
+               rel="noopener noreferrer">
+              فتح الملف ↗
+            </a>
+          </div>
+        `;
+      });
+    } else {
+      html += `<div class="empty-state">لا يوجد محتوى متاح حالياً.</div>`;
+    }
+
+    html += `
+        </div>
+      </section>
+
+      <section class="content-section">
+        <div class="section-title">
+          <h3>📢 الإعلانات</h3>
+        </div>
+
+        <div class="item-list">
+    `;
+
+    if (data.announcements.length) {
+      data.announcements.forEach(item => {
+        html += `
+          <div class="list-item">
+            <div>
+              <strong>${escapeHTML(item.text)}</strong>
+              <small>${escapeHTML(item.date)}</small>
+            </div>
+          </div>
+        `;
+      });
+    } else {
+      html += `<div class="empty-state">لا توجد إعلانات حالياً.</div>`;
+    }
+
+    html += `
+        </div>
+      </section>
+
+      <section class="content-section">
+        <div class="section-title">
+          <h3>📍 تسجيل الحضور</h3>
+        </div>
+    `;
+
+    if (data.lecture) {
+      html += `
+        <div class="dashboard-card">
+          <h3>${escapeHTML(data.lecture.subject)}</h3>
+          <p>
+            <span class="status-badge status-open">الحضور مفتوح</span>
+          </p>
+
+          <div class="form-group" style="margin-top:18px">
+            <label>الكود السري للمحاضرة</label>
+            <input id="attendanceCode"
+                   type="password"
+                   placeholder="أدخل كود المحاضرة">
+          </div>
+
+          <button class="primary-button"
+                  id="attendanceButton"
+                  type="button"
+                  onclick="submitAttendance()">
+            تسجيل الحضور باستخدام GPS
+          </button>
+        </div>
+      `;
+    } else {
+      html += `
+        <div class="empty-state">
+          لا توجد محاضرة مفتوحة لتسجيل الحضور حالياً.
+        </div>
+      `;
+    }
+
+    html += `
+      </section>
+
+      <section class="content-section">
+        <div class="section-title">
+          <h3>💬 الشكاوى والمقترحات</h3>
+        </div>
+
+        <div class="form-group">
+          <label>اكتب شكواك أو مقترحك</label>
+          <textarea id="complaintText"
+                    placeholder="اكتب رسالتك هنا..."></textarea>
+        </div>
+
+        <button class="primary-button"
+                type="button"
+                onclick="sendComplaint()">
+          إرسال الرسالة
+        </button>
+      </section>
+    `;
+
+    $("dashboardContent").innerHTML = html;
+
+  } catch (error) {
+    notify(error.message);
+  } finally {
+    showLoading(false);
+  }
+}
+
+
+/* =========================================
+   تسجيل الحضور GPS
+========================================= */
+
+function submitAttendance() {
+  const code = $("attendanceCode").value.trim();
+
+  if (!code) {
+    notify("أدخل الكود السري للمحاضرة.");
+    return;
+  }
+
+  if (!navigator.geolocation) {
+    notify("المتصفح لا يدعم تحديد الموقع.");
+    return;
+  }
+
+  showLoading(true);
+
+  navigator.geolocation.getCurrentPosition(
+    async position => {
+      try {
+        const result = await callServer(
+          "recordAttendance",
+          authToken,
+          code,
+          position.coords.latitude,
+          position.coords.longitude
+        );
+
+        notify("تم تسجيل حضورك بنجاح للمادة: " + result.subject);
+
+        await renderStudentDashboard();
+
+      } catch (error) {
+        notify(error.message);
+      } finally {
+        showLoading(false);
+      }
+    },
+
+    error => {
+      showLoading(false);
+
+      const messages = {
+        1: "يجب السماح للموقع بالوصول إلى GPS.",
+        2: "تعذر تحديد موقعك. حاول مرة أخرى.",
+        3: "انتهت مهلة تحديد الموقع."
+      };
+
+      notify(messages[error.code] || "تعذر تحديد الموقع.");
+    },
+
+    {
+      enableHighAccuracy: true,
+      timeout: 15000,
+      maximumAge: 0
+    }
+  );
+}
+
+
+/* =========================================
+   إرسال شكوى
+========================================= */
+
+async function sendComplaint() {
+  const message = $("complaintText").value.trim();
+
+  if (message.length < 5) {
+    notify("اكتب تفاصيل الشكوى أو المقترح.");
+    return;
+  }
+
+  showLoading(true);
+
+  try {
+    await callServer(
+      "submitComplaint",
+      authToken,
+      message
+    );
+
+    notify("تم إرسال رسالتك بنجاح.");
+    $("complaintText").value = "";
+
+  } catch (error) {
+    notify(error.message);
+  } finally {
+    showLoading(false);
+  }
+}
+
+
+/* =========================================
+   لوحة الإدارة
+========================================= */
+
+async function loadAdminDashboard(grade = "") {
+  showLoading(true);
+
+  try {
+    adminData = await callServer(
+      "adminGetData",
+      authToken,
+      grade
+    );
+
+    renderAdminDashboard();
+
+  } catch (error) {
+    notify(error.message);
+  } finally {
+    showLoading(false);
+  }
+}
+
+
+function renderAdminDashboard() {
+  const data = adminData;
+
+  const tabs = [
+    ["overview", "الرئيسية"],
+    ["students", "الطلاب"],
+    ["content", "المحتوى"],
+    ["lecture", "المحاضرات"],
+    ["attendance", "الحضور"],
+    ["archive", "الأرشيف"],
+    ["announcements", "الإعلانات"],
+    ["complaints", "الشكاوى"],
+    ["security", "الأمان"]
+  ];
+
+  let html = `
+    <section class="content-section">
+      <div class="section-title">
+        <h3>⚙️ لوحة الإدارة</h3>
+      </div>
+
+      <div class="form-group">
+        <label>تصفية حسب الفرقة</label>
+        <select id="adminGradeFilter"
+                onchange="filterAdminGrade(this.value)">
+          <option value="">كل الفرق</option>
+          ${[...new Set(data.students.map(s => s.grade))]
+            .filter(Boolean)
+            .map(g => `<option value="${escapeHTML(g)}">${escapeHTML(g)}</option>`)
+            .join("")}
+        </select>
+      </div>
+
+      <div class="form-actions">
+        ${tabs.map(([id, label]) => `
+          <button type="button"
+                  class="${currentAdminTab === id ? "primary-button" : "secondary-button"}"
+                  style="width:auto"
+                  onclick="switchAdminTab('${id}')">
+            ${label}
+          </button>
+        `).join("")}
+      </div>
+    </section>
+
+    <div id="adminTabContent"></div>
+  `;
+
+  $("dashboardContent").innerHTML = html;
+
+  renderAdminTab();
+}
+
+
+async function filterAdminGrade(grade) {
+  await loadAdminDashboard(grade);
+}
+
+
+function switchAdminTab(tab) {
+  currentAdminTab = tab;
+  renderAdminDashboard();
+}
+
+
+function renderAdminTab() {
+  const data = adminData;
+  let html = "";
+
+  switch (currentAdminTab) {
+
+    case "overview":
+      html = `
+        <div class="dashboard-grid">
+          ${adminStat("👨‍🎓", "إجمالي الطلاب", data.students.length)}
+          ${adminStat("📚", "المحتوى الدراسي", data.content.length)}
+          ${adminStat("📍", "سجلات الحضور", data.attendance.length)}
+          ${adminStat("📢", "الإعلانات", "إدارة الإعلانات")}
+          ${adminStat("🗃️", "الأرشيف", data.archive.length)}
+          ${adminStat("💬", "الشكاوى", data.complaints.length)}
+        </div>
+      `;
+      break;
+
+    case "students":
+      html = renderStudentsTab(data);
+      break;
+
+    case "content":
+      html = renderContentTab(data);
+      break;
+
+    case "lecture":
+      html = renderLectureTab(data);
+      break;
+
+    case "attendance":
+      html = renderAttendanceTab(data);
+      break;
+
+    case "archive":
+      html = renderArchiveTab(data);
+      break;
+
+    case "announcements":
+      html = renderAnnouncementsTab();
+      break;
+
+    case "complaints":
+      html = renderComplaintsTab(data);
+      break;
+
+    case "security":
+      html = renderSecurityTab();
+      break;
+  }
+
+  $("adminTabContent").innerHTML = html;
+}
+
+
+function adminStat(icon, title, value) {
+  return `
+    <div class="dashboard-card">
+      <div class="card-icon">${icon}</div>
+      <h3>${title}</h3>
+      <p style="font-size:24px;color:var(--primary);font-weight:900">
+        ${escapeHTML(value)}
+      </p>
+    </div>
+  `;
+}
+
+
+/* =========================================
+   إدارة الطلاب
+========================================= */
+
+function renderStudentsTab(data) {
+  return `
+    <section class="content-section">
+      <div class="section-title">
+        <h3>إضافة طالب جديد</h3>
+      </div>
+
+      <div class="form-grid">
+        <div class="form-group">
+          <label>اسم الطالب</label>
+          <input id="newStudentName" placeholder="الاسم بالكامل">
+        </div>
+
+        <div class="form-group">
+          <label>رقم الهاتف</label>
+          <input id="newStudentPhone" placeholder="رقم الهاتف">
+        </div>
+
+        <div class="form-group">
+          <label>الفرقة</label>
+          <input id="newStudentGrade" placeholder="مثال: الفرقة الأولى">
+        </div>
+
+        <div class="form-group">
+          <label>كلمة المرور</label>
+          <input id="newStudentPassword"
+                 type="password"
+                 placeholder="6 أحرف على الأقل">
+        </div>
+      </div>
+
+      <button class="primary-button"
+              onclick="addStudent()">
+        إضافة الطالب
+      </button>
+    </section>
+
+    <section class="content-section">
+      <div class="section-title">
+        <h3>قائمة الطلاب (${data.students.length})</h3>
+      </div>
+
+      <div class="table-wrapper">
+        <table>
+          <thead>
+            <tr>
+              <th>الكود</th>
+              <th>الاسم</th>
+              <th>الهاتف</th>
+              <th>الفرقة</th>
+              <th>الإجراءات</th>
+            </tr>
+          </thead>
+
+          <tbody>
+            ${data.students.map(s => `
+              <tr>
+                <td>${escapeHTML(s.id)}</td>
+                <td>${escapeHTML(s.name)}</td>
+                <td>${escapeHTML(s.phone)}</td>
+                <td>${escapeHTML(s.grade)}</td>
+                <td>
+                  <button class="secondary-button"
+                          onclick="editStudent('${escapeHTML(s.id)}')">
+                    تعديل
+                  </button>
+
+                  <button class="danger-button"
+                          onclick="removeStudent('${escapeHTML(s.id)}')">
+                    حذف
+                  </button>
+                </td>
+              </tr>
+            `).join("")}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  `;
+}
+
+
+async function addStudent() {
+  const data = {
+    name: $("newStudentName").value.trim(),
+    phone: $("newStudentPhone").value.trim(),
+    grade: $("newStudentGrade").value.trim(),
+    password: $("newStudentPassword").value
+  };
+
+  if (!data.name || !data.grade || data.password.length < 6) {
+    notify("أكمل البيانات المطلوبة وكلمة مرور لا تقل عن 6 أحرف.");
+    return;
+  }
+
+  showLoading(true);
+
+  try {
+    const result = await callServer(
+      "registerStudent",
+      authToken,
+      data
+    );
+
+    notify(
+      "تم إضافة الطالب بنجاح.\nالكود الجامعي: " + result.id
+    );
+
+    await loadAdminDashboard();
+
+  } catch (error) {
+    notify(error.message);
+  } finally {
+    showLoading(false);
+  }
+}
+
+
+async function editStudent(id) {
+  const student = adminData.students.find(s => s.id === id);
+  if (!student) return;
+
+  const name = prompt("اسم الطالب:", student.name);
+  if (name === null) return;
+
+  const phone = prompt("رقم الهاتف:", student.phone);
+  if (phone === null) return;
+
+  const grade = prompt("الفرقة:", student.grade);
+  if (grade === null) return;
+
+  const password = prompt(
+    "كلمة مرور جديدة (اتركها فارغة دون تغيير):",
+    ""
+  );
+
+  if (password === null) return;
+
+  showLoading(true);
+
+  try {
+    await callServer("updateStudent", authToken, {
+      id,
+      name,
+      phone,
+      grade,
+      password
+    });
+
+    notify("تم تحديث بيانات الطالب.");
+    await loadAdminDashboard();
+
+  } catch (error) {
+    notify(error.message);
+  } finally {
+    showLoading(false);
+  }
+}
+
+
+async function removeStudent(id) {
+  if (!confirm("هل أنت متأكد من حذف الطالب؟")) return;
+
+  showLoading(true);
+
+  try {
+    await callServer("deleteStudent", authToken, id);
+    notify("تم حذف الطالب.");
+    await loadAdminDashboard();
+
+  } catch (error) {
+    notify(error.message);
+  } finally {
+    showLoading(false);
+  }
+}
+
+
+/* =========================================
+   إدارة المحتوى
+========================================= */
+
+function renderContentTab(data) {
+  return `
+    <section class="content-section">
+      <div class="section-title">
+        <h3>إضافة محتوى دراسي</h3>
+      </div>
+
+      <div class="form-grid">
+        <div class="form-group">
+          <label>الفرقة</label>
+          <input id="contentGrade" placeholder="الفرقة الأولى">
+        </div>
+
+        <div class="form-group">
+          <label>نوع المحتوى</label>
+          <select id="contentType">
+            <option value="book">كتاب</option>
+            <option value="schedule">جدول</option>
+            <option value="exam">امتحان</option>
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label>عنوان المحتوى</label>
+          <input id="contentTitle" placeholder="اسم الملف">
+        </div>
+
+        <div class="form-group">
+          <label>رابط الملف</label>
+          <input id="contentUrl" placeholder="https://...">
+        </div>
+      </div>
+
+      <button class="primary-button"
+              onclick="addContent()">
+        إضافة المحتوى
+      </button>
+    </section>
+
+    <section class="content-section">
+      <div class="section-title">
+        <h3>المحتوى الحالي</h3>
+      </div>
+
+      <div class="table-wrapper">
+        <table>
+          <thead>
+            <tr>
+              <th>الفرقة</th>
+              <th>النوع</th>
+              <th>العنوان</th>
+              <th>الرابط</th>
+              <th>حذف</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${data.content.map(c => `
+              <tr>
+                <td>${escapeHTML(c.grade)}</td>
+                <td>${escapeHTML(c.type)}</td>
+                <td>${escapeHTML(c.title)}</td>
+                <td>
+                  <a href="${escapeHTML(c.url)}"
+                     target="_blank"
+                     rel="noopener noreferrer">فتح</a>
+                </td>
+                <td>
+                  <button class="danger-button"
+                          onclick="removeContent(${Number(c.row)})">
+                    حذف
+                  </button>
+                </td>
+              </tr>
+            `).join("")}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  `;
+}
+
+
+async function addContent() {
+  const data = {
+    grade: $("contentGrade").value.trim(),
+    type: $("contentType").value,
+    title: $("contentTitle").value.trim(),
+    url: $("contentUrl").value.trim()
+  };
+
+  showLoading(true);
+
+  try {
+    await callServer("addGradeContent", authToken, data);
+    notify("تمت إضافة المحتوى.");
+    await loadAdminDashboard();
+
+  } catch (error) {
+    notify(error.message);
+  } finally {
+    showLoading(false);
+  }
+}
+
+
+async function removeContent(row) {
+  if (!confirm("هل تريد حذف هذا المحتوى؟")) return;
+
+  showLoading(true);
+
+  try {
+    await callServer("deleteGradeContent", authToken, row);
+    notify("تم حذف المحتوى.");
+    await loadAdminDashboard();
+
+  } catch (error) {
+    notify(error.message);
+  } finally {
+    showLoading(false);
+  }
+}
+
+
+/* =========================================
+   إعداد المحاضرات والحضور
+========================================= */
+
+function renderLectureTab(data) {
+  const settings = data.settings;
+
+  return `
+    <section class="content-section">
+      <div class="section-title">
+        <h3>إعداد محاضرة</h3>
+      </div>
+
+      <div class="form-grid">
+        <div class="form-group">
+          <label>الفرقة</label>
+          <input id="lectureGrade" placeholder="الفرقة الأولى">
+        </div>
+
+        <div class="form-group">
+          <label>اسم المادة</label>
+          <input id="lectureSubject" placeholder="اسم المادة">
+        </div>
+
+        <div class="form-group">
+          <label>رابط الموقع على الخريطة (اختياري)</label>
+          <input id="lectureMap" placeholder="رابط Google Maps">
+        </div>
+
+        <div class="form-group">
+          <label>نطاق الحضور بالمتر</label>
+          <input id="lectureRadius" type="number" value="100">
+        </div>
+
+        <div class="form-group">
+          <label>الكود السري للمحاضرة</label>
+          <input id="lectureCode" type="password">
+        </div>
+
+        <div class="form-group">
+          <label>خط العرض Latitude</label>
+          <input id="lectureLat" type="number" step="any">
+        </div>
+
+        <div class="form-group">
+          <label>خط الطول Longitude</label>
+          <input id="lectureLng" type="number" step="any">
+        </div>
+      </div>
+
+      <button class="primary-button"
+              onclick="saveLecture()">
+        حفظ إعدادات المحاضرة
+      </button>
+    </section>
+
+    <section class="content-section">
+      <div class="section-title">
+        <h3>المحاضرات المسجلة</h3>
+      </div>
+
+      <div class="table-wrapper">
+        <table>
+          <thead>
+            <tr>
+              <th>الفرقة</th>
+              <th>المادة</th>
+              <th>النطاق</th>
+              <th>الحالة</th>
+              <th>الإجراء</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${settings.map(s => `
+              <tr>
+                <td>${escapeHTML(s.grade)}</td>
+                <td>${escapeHTML(s.subject)}</td>
+                <td>${escapeHTML(s.radius)} متر</td>
+                <td>
+                  <span class="status-badge ${s.open ? "status-open" : "status-closed"}">
+                    ${s.open ? "مفتوح" : "مغلق"}
+                  </span>
+                </td>
+                <td>
+                  <button class="${s.open ? "danger-button" : "secondary-button"}"
+                          onclick="changeLectureStatus('${escapeHTML(s.grade)}', ${!s.open})">
+                    ${s.open ? "إغلاق الحضور" : "فتح الحضور"}
+                  </button>
+                </td>
+              </tr>
+            `).join("")}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  `;
+}
+
+
+async function saveLecture() {
+  const data = {
+    grade: $("lectureGrade").value.trim(),
+    subject: $("lectureSubject").value.trim(),
+    map: $("lectureMap").value.trim(),
+    radius: $("lectureRadius").value,
+    code: $("lectureCode").value,
+    lat: $("lectureLat").value,
+    lng: $("lectureLng").value
+  };
+
+  showLoading(true);
+
+  try {
+    await callServer("saveLectureSettings", authToken, data);
+    notify("تم حفظ إعدادات المحاضرة.");
+    await loadAdminDashboard();
+
+  } catch (error) {
+    notify(error.message);
+  } finally {
+    showLoading(false);
+  }
+}
+
+
+async function changeLectureStatus(grade, open) {
+  if (!confirm(open ? "فتح تسجيل الحضور؟" : "إغلاق تسجيل الحضور؟")) {
+    return;
+  }
+
+  showLoading(true);
+
+  try {
+    await callServer(
+      "toggleAttendance",
+      authToken,
+      grade,
+      open
+    );
+
+    notify(open ? "تم فتح الحضور." : "تم إغلاق الحضور.");
+    await loadAdminDashboard();
+
+  } catch (error) {
+    notify(error.message);
+  } finally {
+    showLoading(false);
+  }
+}
+
+
+/* =========================================
+   سجلات الحضور
+========================================= */
+
+function renderAttendanceTab(data) {
+  return `
+    <section class="content-section">
+      <div class="section-title">
+        <h3>سجلات الحضور (${data.attendance.length})</h3>
+      </div>
+
+      <div class="form-actions">
+        <button class="primary-button"
+                style="width:auto"
+                onclick="archiveCurrentLecture()">
+          أرشفة حضور المحاضرة الحالية CSV
+        </button>
+      </div>
+
+      <div class="table-wrapper">
+        <table>
+          <thead>
+            <tr>
+              <th>التاريخ والوقت</th>
+              <th>الفرقة</th>
+              <th>كود الطالب</th>
+              <th>اسم الطالب</th>
+              <th>المادة</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${data.attendance.map(a => `
+              <tr>
+                <td>${escapeHTML(a.time)}</td>
+                <td>${escapeHTML(a.grade)}</td>
+                <td>${escapeHTML(a.id)}</td>
+                <td>${escapeHTML(a.name)}</td>
+                <td>${escapeHTML(a.subject)}</td>
+              </tr>
+            `).join("")}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  `;
+}
+
+
+async function archiveCurrentLecture() {
+  const grade = prompt("اكتب اسم الفرقة المراد أرشفة حضورها:");
+  if (!grade) return;
+
+  if (!confirm("سيتم إنشاء ملف CSV ثم حذف سجلات هذه المحاضرة من الحضور الحي. هل تريد المتابعة؟")) {
+    return;
+  }
+
+  showLoading(true);
+
+  try {
+    const result = await callServer(
+      "archiveLecture",
+      authToken,
+      grade
+    );
+
+    notify(
+      "تمت الأرشفة بنجاح.\nعدد السجلات: " +
+      result.count +
+      "\nرابط الملف:\n" +
+      result.url
+    );
+
+    await loadAdminDashboard();
+
+  } catch (error) {
+    notify(error.message);
+  } finally {
+    showLoading(false);
+  }
+}
+
+
+/* =========================================
+   الأرشيف
+========================================= */
+
+function renderArchiveTab(data) {
+  return `
+    <section class="content-section">
+      <div class="section-title">
+        <h3>أرشيف الحضور</h3>
+      </div>
+
+      <div class="table-wrapper">
+        <table>
+          <thead>
+            <tr>
+              <th>الفرقة</th>
+              <th>المادة</th>
+              <th>التاريخ</th>
+              <th>عدد الحضور</th>
+              <th>الملف</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${data.archive.map(a => `
+              <tr>
+                <td>${escapeHTML(a.grade)}</td>
+                <td>${escapeHTML(a.subject)}</td>
+                <td>${escapeHTML(a.date)}</td>
+                <td>${escapeHTML(a.count)}</td>
+                <td>
+                  <a href="${escapeHTML(a.url)}"
+                     target="_blank"
+                     rel="noopener noreferrer">
+                    تحميل CSV ↗
+                  </a>
+                </td>
+              </tr>
+            `).join("")}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  `;
+}
+
+
+/* =========================================
+   الإعلانات
+========================================= */
+
+function renderAnnouncementsTab() {
+  return `
+    <section class="content-section">
+      <div class="section-title">
+        <h3>نشر إعلان جديد</h3>
+      </div>
+
+      <div class="form-group">
+        <label>الفرقة المستهدفة</label>
+        <input id="announcementGrade"
+               placeholder="اكتب اسم الفرقة أو الكل">
+      </div>
+
+      <div class="form-group">
+        <label>نص الإعلان</label>
+        <textarea id="announcementText"
+                  placeholder="اكتب الإعلان هنا..."></textarea>
+      </div>
+
+      <button class="primary-button"
+              onclick="publishAnnouncement()">
+        نشر الإعلان
+      </button>
+    </section>
+  `;
+}
+
+
+async function publishAnnouncement() {
+  const grade = $("announcementGrade").value.trim();
+  const message = $("announcementText").value.trim();
+
+  if (!message) {
+    notify("اكتب نص الإعلان.");
+    return;
+  }
+
+  showLoading(true);
+
+  try {
+    await callServer(
+      "addAnnouncement",
+      authToken,
+      grade || "الكل",
+      message
+    );
+
+    notify("تم نشر الإعلان بنجاح.");
+    await loadAdminDashboard();
+
+  } catch (error) {
+    notify(error.message);
+  } finally {
+    showLoading(false);
+  }
+}
+
+
+/* =========================================
+   الشكاوى
+========================================= */
+
+function renderComplaintsTab(data) {
+  return `
+    <section class="content-section">
+      <div class="section-title">
+        <h3>الشكاوى والمقترحات (${data.complaints.length})</h3>
+      </div>
+
+      <div class="item-list">
+        ${data.complaints.length
+          ? data.complaints.map(c => `
+            <div class="list-item">
+              <div>
+                <strong>${escapeHTML(c.name)}</strong>
+                <small>
+                  ${escapeHTML(c.id)} |
+                  ${escapeHTML(c.grade)} |
+                  ${escapeHTML(c.time)}
+                </small>
+                <p style="margin-top:12px;color:var(--text)">
+                  ${escapeHTML(c.text)}
+                </p>
+              </div>
+            </div>
+          `).join("")
+          : `<div class="empty-state">لا توجد شكاوى حالياً.</div>`
+        }
+      </div>
+    </section>
+  `;
+}
+
+
+/* =========================================
+   الأمان وتغيير كلمة المرور
+========================================= */
+
+function renderSecurityTab() {
+  return `
+    <section class="content-section">
+      <div class="section-title">
+        <h3>تغيير كلمة مرور الإدارة</h3>
+      </div>
+
+      <div class="form-group">
+        <label>كلمة المرور الجديدة</label>
+        <input id="newAdminPassword"
+               type="password"
+               placeholder="10 أحرف على الأقل">
+      </div>
+
+      <button class="primary-button"
+              onclick="updateAdminPassword()">
+        تغيير كلمة المرور
+      </button>
+    </section>
+
+    <section class="content-section">
+      <h3>إرشادات أمنية</h3>
+      <p style="color:var(--muted);line-height:2;margin-top:12px">
+        • لا تشارك بيانات دخول الإدارة مع أي شخص.<br>
+        • استخدم كلمة مرور قوية وفريدة.<br>
+        • لا تنشر ملفات النظام أو بيانات الطلاب علناً.<br>
+        • احتفظ بنسخة احتياطية من Google Sheets.
+      </p>
+    </section>
+  `;
+}
+
+
+async function updateAdminPassword() {
+  const password = $("newAdminPassword").value;
+
+  if (password.length < 10) {
+    notify("كلمة المرور يجب ألا تقل عن 10 أحرف.");
+    return;
+  }
+
+  showLoading(true);
+
+  try {
+    await callServer(
+      "changeAdminPassword",
+      authToken,
+      password
+    );
+
+    notify("تم تغيير كلمة مرور الإدارة بنجاح.");
+    $("newAdminPassword").value = "";
+
+  } catch (error) {
+    notify(error.message);
+  } finally {
+    showLoading(false);
+  }
+}
+
+
+/* =========================================
+   بدء التطبيق
+========================================= */
+
+document.addEventListener("DOMContentLoaded", () => {
+  showLoginType("student");
+});
+</script>
