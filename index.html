@@ -1,0 +1,179 @@
+
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <base target="_top">
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#080d1b">
+  <meta name="description" content="نظام إدارة أكاديمية كلية الإعلام">
+  <title>النظام الأكاديمي | كلية الإعلام</title>
+
+  <!-- ملفات التصميم -->
+  <?!= include('Styles'); ?>
+</head>
+
+<body>
+
+  <div class="app-container">
+
+    <!-- رأس الموقع -->
+    <header class="main-header">
+      <div class="brand">
+        <div class="brand-logo">M</div>
+        <div class="brand-info">
+          <h1>MEDIA ACADEMY</h1>
+          <p>النظام الأكاديمي السحابي</p>
+        </div>
+      </div>
+
+      <div class="header-status">
+        <span class="status-dot"></span>
+        <span>النظام متصل</span>
+      </div>
+    </header>
+
+    <!-- المحتوى الرئيسي -->
+    <main class="main-content">
+
+      <!-- شاشة تسجيل الدخول -->
+      <section id="loginSection" class="login-section">
+
+        <div class="login-card">
+
+          <div class="login-icon">🎓</div>
+
+          <h2>مرحباً بك</h2>
+          <p class="login-subtitle">
+            سجّل الدخول إلى النظام الأكاديمي لكلية الإعلام
+          </p>
+
+          <div class="login-tabs">
+            <button
+              type="button"
+              id="studentTab"
+              class="login-tab active"
+              onclick="showLoginType('student')">
+              دخول الطلاب
+            </button>
+
+            <button
+              type="button"
+              id="adminTab"
+              class="login-tab"
+              onclick="showLoginType('admin')">
+              دخول الإدارة
+            </button>
+          </div>
+
+          <!-- دخول الطالب -->
+          <form id="studentLoginForm">
+
+            <div class="form-group">
+              <label for="studentCode">الكود الجامعي</label>
+              <input
+                type="text"
+                id="studentCode"
+                placeholder="أدخل الكود الجامعي"
+                autocomplete="username"
+                required>
+            </div>
+
+            <div class="form-group">
+              <label for="studentPassword">كلمة المرور</label>
+              <input
+                type="password"
+                id="studentPassword"
+                placeholder="أدخل كلمة المرور"
+                autocomplete="current-password"
+                required>
+            </div>
+
+            <button type="submit" class="primary-button">
+              تسجيل دخول الطالب
+            </button>
+
+          </form>
+
+          <!-- دخول الإدارة -->
+          <form id="adminLoginForm" hidden>
+
+            <div class="form-group">
+              <label for="adminUsername">اسم المستخدم</label>
+              <input
+                type="text"
+                id="adminUsername"
+                placeholder="اسم المستخدم"
+                autocomplete="username"
+                required>
+            </div>
+
+            <div class="form-group">
+              <label for="adminPassword">كلمة المرور</label>
+              <input
+                type="password"
+                id="adminPassword"
+                placeholder="كلمة مرور الإدارة"
+                autocomplete="current-password"
+                required>
+            </div>
+
+            <button type="submit" class="primary-button">
+              دخول لوحة الإدارة
+            </button>
+
+          </form>
+
+          <div id="loginMessage" class="message-box" hidden></div>
+
+          <div class="login-footer">
+            كلية الإعلام © جميع الحقوق محفوظة
+          </div>
+
+        </div>
+      </section>
+
+      <!-- منطقة التطبيق بعد تسجيل الدخول -->
+      <section id="appSection" hidden>
+
+        <div class="dashboard-header">
+          <div>
+            <span class="welcome-label">مرحباً بك</span>
+            <h2 id="userName">المستخدم</h2>
+            <p id="userInfo"></p>
+          </div>
+
+          <button
+            type="button"
+            id="logoutButton"
+            class="logout-button">
+            تسجيل الخروج
+          </button>
+        </div>
+
+        <!-- محتوى لوحة الطالب والإدارة -->
+        <div id="dashboardContent"></div>
+
+      </section>
+
+      <!-- رسالة التحميل -->
+      <div id="loadingOverlay" class="loading-overlay" hidden>
+        <div class="loading-spinner"></div>
+        <p>جاري تحميل النظام...</p>
+      </div>
+
+    </main>
+
+    <!-- التذييل -->
+    <footer class="main-footer">
+      <p>MEDIA ACADEMY CLOUD</p>
+      <span>نظام أكاديمي متكامل لإدارة كلية الإعلام</span>
+    </footer>
+
+  </div>
+
+  <!-- ملف وظائف الموقع -->
+  <?!= include('Client'); ?>
+
+</body>
+</html>
